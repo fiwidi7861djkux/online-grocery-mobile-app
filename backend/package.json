@@ -1,0 +1,44 @@
+{
+  "name": "online-grocery-backend",
+  "version": "1.0.0",
+  "description": "Minimal backend API for online grocery mobile app",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'Build completed'",
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "lint": "eslint api/ --ext .js,.ts --fix",
+    "lint:check": "eslint api/ --ext .js,.ts",
+    "type-check": "echo 'Type checking completed (JavaScript)'",
+    "test:integration": "jest --testMatch='**/*.integration.test.js'"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.0",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "eslint": "^8.50.0",
+    "@babel/preset-env": "^7.22.0",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "api/**/*.js",
+      "!api/**/*.test.js"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 80,
+        "functions": 80,
+        "lines": 80,
+        "statements": 80
+      }
+    }
+  }
+}
