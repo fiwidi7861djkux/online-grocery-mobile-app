@@ -1,0 +1,2 @@
+# Customer App local properties template
+api.base.url=https://your-backend.vercel.app
