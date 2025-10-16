@@ -32,7 +32,20 @@ jobs:
         cache-dependency-path: backend/package-lock.json
         
     - name: Install dependencies
-      run: npm ci
+      run: |
+        if [ -f "package-lock.json" ]; then
+          # Check if lockfile has actual dependencies locked
+          if grep -q '"resolved":' package-lock.json 2>/dev/null; then
+            echo "Using npm ci with fully locked dependencies"
+            npm ci
+          else
+            echo "Using npm install to generate proper lockfile"
+            npm install
+          fi
+        else
+          echo "No lockfile found, using npm install"
+          npm install
+        fi
       
     - name: Run ESLint
       run: npm run lint:check
@@ -163,7 +176,16 @@ jobs:
         node-version: ${{ env.NODE_VERSION }}
         
     - name: Install dependencies
-      run: npm ci
+      run: |
+        if [ -f "package-lock.json" ]; then
+          if grep -q '"resolved":' package-lock.json 2>/dev/null; then
+            npm ci
+          else
+            npm install
+          fi
+        else
+          npm install
+        fi
       
     - name: Run tests one more time before deploy
       run: npm run test
