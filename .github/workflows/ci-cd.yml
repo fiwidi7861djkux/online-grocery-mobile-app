@@ -1,0 +1,257 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+  JAVA_VERSION: '17'
+
+jobs:
+  # Backend API Testing and Deployment
+  backend-test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: backend/package-lock.json
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run linting
+      run: npm run lint
+      
+    - name: Run type checking
+      run: npm run type-check
+      
+    - name: Run unit tests
+      run: npm run test
+      
+    - name: Run integration tests
+      run: npm run test:integration
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        
+    - name: Upload test coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage/lcov.info
+        flags: backend
+
+  # Android Apps Build and Test
+  android-test:
+    name: Android Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [customer-app, admin-app, delivery-app]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+        
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v2
+      
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+          
+    - name: Create local.properties
+      run: |
+        echo "supabase.url=${{ secrets.SUPABASE_URL }}" > ${{ matrix.app }}/local.properties
+        echo "supabase.anon.key=${{ secrets.SUPABASE_ANON_KEY }}" >> ${{ matrix.app }}/local.properties
+        echo "google.maps.api.key=${{ secrets.GOOGLE_MAPS_API_KEY }}" >> ${{ matrix.app }}/local.properties
+        
+    - name: Run unit tests
+      run: |
+        cd ${{ matrix.app }}
+        ./gradlew testDebugUnitTest
+        
+    - name: Run lint checks
+      run: |
+        cd ${{ matrix.app }}
+        ./gradlew lintDebug
+        
+    - name: Build debug APK
+      run: |
+        cd ${{ matrix.app }}
+        ./gradlew assembleDebug
+        
+    - name: Upload APK artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.app }}-debug-apk
+        path: ${{ matrix.app }}/app/build/outputs/apk/debug/*.apk
+        retention-days: 7
+
+  # Security and Quality Checks
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [backend-test]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Deploy to Vercel (Production)
+  deploy-backend:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    needs: [backend-test, security-scan]
+    if: github.ref == 'refs/heads/main'
+    defaults:
+      run:
+        working-directory: ./backend
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Build project
+      run: npm run build
+      
+    - name: Deploy to Vercel
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        working-directory: ./backend
+        scope: ${{ secrets.VERCEL_ORG_ID }}
+
+  # Build Release APKs (on tags)
+  build-release:
+    name: Build Release APKs
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android-test]
+    strategy:
+      matrix:
+        app: [customer-app, admin-app, delivery-app]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+        
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v2
+      
+    - name: Create local.properties
+      run: |
+        echo "supabase.url=${{ secrets.SUPABASE_URL }}" > ${{ matrix.app }}/local.properties
+        echo "supabase.anon.key=${{ secrets.SUPABASE_ANON_KEY }}" >> ${{ matrix.app }}/local.properties
+        echo "google.maps.api.key=${{ secrets.GOOGLE_MAPS_API_KEY }}" >> ${{ matrix.app }}/local.properties
+        
+    - name: Create keystore
+      run: |
+        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ${{ matrix.app }}/app/keystore.jks
+        
+    - name: Build release APK
+      run: |
+        cd ${{ matrix.app }}
+        ./gradlew assembleRelease
+      env:
+        SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+        SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+        
+    - name: Build release AAB
+      run: |
+        cd ${{ matrix.app }}
+        ./gradlew bundleRelease
+      env:
+        SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+        SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+        
+    - name: Upload release artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.app }}-release
+        path: |
+          ${{ matrix.app }}/app/build/outputs/apk/release/*.apk
+          ${{ matrix.app }}/app/build/outputs/bundle/release/*.aab
+
+  # Notification on completion
+  notify-completion:
+    name: Notify Completion
+    runs-on: ubuntu-latest
+    needs: [backend-test, android-test, security-scan]
+    if: always()
+    
+    steps:
+    - name: Notify success
+      if: needs.backend-test.result == 'success' && needs.android-test.result == 'success'
+      run: |
+        echo "✅ All tests passed successfully!"
+        echo "Backend tests: ${{ needs.backend-test.result }}"
+        echo "Android tests: ${{ needs.android-test.result }}"
+        echo "Security scan: ${{ needs.security-scan.result }}"
+        
+    - name: Notify failure
+      if: needs.backend-test.result == 'failure' || needs.android-test.result == 'failure'
+      run: |
+        echo "❌ Some tests failed!"
+        echo "Backend tests: ${{ needs.backend-test.result }}"
+        echo "Android tests: ${{ needs.android-test.result }}"
+        echo "Security scan: ${{ needs.security-scan.result }}"
+        exit 1
