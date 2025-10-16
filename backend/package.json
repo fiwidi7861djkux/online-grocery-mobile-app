@@ -1,0 +1,24 @@
+{
+  "name": "online-grocery-backend",
+  "version": "1.0.0",
+  "description": "Minimal backend API for online grocery mobile app",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "vercel build",
+    "test": "jest",
+    "lint": "eslint . --ext .js,.ts",
+    "type-check": "echo 'Type checking placeholder'"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.0",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "eslint": "^8.50.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
